@@ -1,11 +1,6 @@
 ---
-layout: archive
+layout: post-index
 title: {{ title }}
-date: {{ date }}
-modified:
-excerpt:
-image:
-  feature:
-  teaser:
-  thumb:
+permalink:
+description:
 ---
