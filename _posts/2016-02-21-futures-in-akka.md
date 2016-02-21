@@ -2,7 +2,7 @@
 layout: post
 title: Futures in Akka
 description: "Fun times using Futures from Actors"
-modified: 2016-02-20
+modified: 2016-02-21
 tags: [future, akka, actor, failure, supervision]
 image:
   feature: abstract-4.jpg
@@ -187,8 +187,9 @@ class FutureActor(repo: Repo) extends Actor {
   def receive = {
     case GetJawn(id) =>
       println("...getting jawn...")
+      val recipient = sender()
       repo.getJawn(id).onComplete {
-        case Success(jawn) => sender ! jawn
+        case Success(jawn) => recipient ! jawn
         case Failure(e) => self ! akka.actor.Status.Failure(e)
       }
 
