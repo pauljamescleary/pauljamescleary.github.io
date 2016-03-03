@@ -2,7 +2,8 @@
 layout: post
 title: Futures in Akka
 description: "Fun times using Futures from Actors"
-modified: 2016-02-21
+created: 2016-02-21
+modified: 2016-03-02
 tags: [future, akka, actor, failure, supervision]
 image:
   feature: abstract-4.jpg
@@ -215,17 +216,76 @@ We will run our test again, and checkout the output:
 
 Success!  We have forced our actor to restart (we can see the "Stopping" message in the output)
 
-## Conclusions
-Yea, I no like this.  There are ways to get around this, because it feels like alot of boilerplate coming our way.
+## Solution
+[Johan Andren](https://markatta.com/codemonkey/) was kind enough to offer a solution that I have adopted.  His solution is described in his block post [Futures Plus Supervision in Akka](https://markatta.com/codemonkey/blog/2016/02/25/futures-plus-supervision-in-akka/).
 
-Options include:
+The solution is a replacement for `Pipe` support that comes with akka.
 
-- Creating your own Actor base class that overrides *unhandled*.  That would at least keep you from having to check *akka.actor.Status.Failure* in all your actors
-- Some kind of concoction that would auto send failures to the actor.
+~~~scala
+object SupervisedPipe {
 
-I am working on solutions.  Certainly, if you all have experience with this problem and have developed an elegant solution (or can tell me where I went wrong), but all means, please provide feedback!
+  case class SupervisedFailure(ex: Throwable)
 
+  class SupervisedPipeableFuture[T](future: Future[T])(implicit executionContext: ExecutionContext) {
+    // implicit failure recipient goes to self when used inside an actor
+    def supervisedPipeTo(successRecipient: ActorRef)(implicit failureRecipient: ActorRef): Unit =
+      future.andThen {
+        case Success(result) => successRecipient ! result
+        case Failure(ex) => failureRecipient ! SupervisedFailure(ex)
+      }
+  }
 
+  implicit def supervisedPipeTo[T](future: Future[T])(implicit executionContext: ExecutionContext): SupervisedPipeableFuture[T] =
+    new SupervisedPipeableFuture[T](future)
+
+  /* `orElse` with the actor receive logic */
+  val handleSupervisedFailure: Receive = {
+    // just throw the exception and make the actor logic handle it
+    case SupervisedFailure(ex) => throw ex
+  }
+
+  def supervised(receive: Receive): Receive = 
+    handleSupervisedFailure orElse receive
+}
+~~~
+
+### Use in a normal actor
+To use the `supervisedPipeTo` in a normal actor, you need to do the following:
+
+- use supervisePipeTo instead of pipeTo
+- use either the `handleSupervisedFailure` or `supervised` on your receive.
+
+Let's revisit our example from above.  With the new SupervisedPipe feature, it would look like the following:
+
+~~~scala
+class FutureActor(repo: Repo) extends Actor {
+  import FutureActor._
+  
+  def receive = supervised(logic)
+
+  def logic: Receive = {
+    case GetJawn(id) =>
+      println("...getting jawn...")
+      repo.getJawn(id) supervisedPipeTo sender
+  }
+}
+~~~
+
+That's pretty nice!  We don't have to deal with the `akka.actor.Status.Failure` explicitly in our actor.  The minor inconvenience is to wrap our receive block, but that is somewhat commonplace.
+
+### Use with an FSM
+If you happen to use Akka FSM, you'll have to override the FSM `receive` in a similar way.  FSM's provide their own implementation of `receive` that works behind the scenes to run your state machine.  I don't have a full fleged example of an FSM, but here is a short snippet:
+
+~~~scala
+class ThatJawn extends FSM[State, Data] {
+
+	override def receive: Receive = supervised(super.receive)
+	/* rest of FSM stuff here */
+}
+~~~
+
+## Conclusion
+Thanks again to [Johan Andrén](https://markatta.com/codemonkey/) for his solution.  It makes working with Futures in Akka simpler and without a lot of overhead.
 
 
 
